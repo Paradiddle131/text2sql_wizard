@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+litellm
+pydantic
+pydantic-settings
+python-dotenv
+requests
+langchain
+langchain-community
+sentence-transformers
+chromadb
+pandas
+sqlalchemy
+unstructured
+pypdf
+plotly
