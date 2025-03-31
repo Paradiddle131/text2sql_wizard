@@ -1,5 +1,5 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict, computed_field
-from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, computed_field
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -49,12 +49,10 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "./logs/app.log"  # Relative path for log file
 
-    @property
     @computed_field
     def PROJECT_ROOT_PATH(self) -> Path:
         return BASE_DIR
 
-    @property
     @computed_field
     def VECTOR_STORE_PATH(self) -> Path:
         path = Path(self.VECTOR_STORE_PATH_STR)
@@ -62,7 +60,6 @@ class Settings(BaseSettings):
             return (self.PROJECT_ROOT_PATH / path).resolve()
         return path
 
-    @property
     @computed_field
     def DATABASE_URL(self) -> str:
         """Resolves the database URL and handles relative SQLite paths."""
@@ -76,7 +73,6 @@ class Settings(BaseSettings):
             return f"sqlite:///{abs_path}"
         return db_url
 
-    @property
     @computed_field
     def LOGS_DIR(self) -> Path:
         """Resolves the absolute log directory without side effects."""
@@ -85,7 +81,6 @@ class Settings(BaseSettings):
             log_file_path = (self.PROJECT_ROOT_PATH / log_file_path).resolve()
         return log_file_path.parent
 
-    @property
     @computed_field
     def RESOLVED_LOG_FILE(self) -> Path:
         """Resolves the absolute log file path."""
