@@ -1,4 +1,4 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict, computed_field
 from pydantic import Field
 from pathlib import Path
 
@@ -43,18 +43,19 @@ class Settings(BaseSettings):
     VECTOR_STORE_COLLECTION: str = "text2sql_rag"
 
     # --- Database Configuration ---
-    DATABASE_URL_STR: str = Field(..., validation_alias="DATABASE_URL")
+    DATABASE_URL_STR: str = Field(..., alias="DATABASE_URL")
 
     # --- Logging Configuration ---
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "./logs/app.log"  # Relative path for log file
 
-    # --- Calculated Paths ---
     @property
+    @computed_field
     def PROJECT_ROOT_PATH(self) -> Path:
         return BASE_DIR
 
     @property
+    @computed_field
     def VECTOR_STORE_PATH(self) -> Path:
         path = Path(self.VECTOR_STORE_PATH_STR)
         if not path.is_absolute():
@@ -62,46 +63,49 @@ class Settings(BaseSettings):
         return path
 
     @property
+    @computed_field
     def DATABASE_URL(self) -> str:
-        """Resolves the database URL, handling relative SQLite paths."""
-        db_url = self.DATABASE_URL_STR  # Get value loaded by Pydantic
+        """Resolves the database URL and handles relative SQLite paths."""
+        db_url = self.DATABASE_URL_STR
         if db_url.startswith("sqlite:///./"):
             relative_path = db_url[len("sqlite:///./") :]
             abs_path = (self.PROJECT_ROOT_PATH / relative_path).resolve()
-            abs_path.parent.mkdir(parents=True, exist_ok=True)
             return f"sqlite:///{abs_path}"
         elif db_url.startswith("sqlite:///"):
-            abs_path = Path(db_url[len("sqlite:///") :])
-            abs_path.parent.mkdir(parents=True, exist_ok=True)
-            return db_url
+            abs_path = Path(db_url[len("sqlite:///") :]).resolve()
+            return f"sqlite:///{abs_path}"
         return db_url
 
     @property
+    @computed_field
     def LOGS_DIR(self) -> Path:
-        """Resolves the absolute path to the log directory."""
+        """Resolves the absolute log directory without side effects."""
         log_file_path = Path(self.LOG_FILE)
         if not log_file_path.is_absolute():
             log_file_path = (self.PROJECT_ROOT_PATH / log_file_path).resolve()
-        log_dir = log_file_path.parent
-        log_dir.mkdir(parents=True, exist_ok=True)  # Ensure logs directory exists
-        return log_dir
+        return log_file_path.parent
 
     @property
+    @computed_field
     def RESOLVED_LOG_FILE(self) -> Path:
-        """Resolves the absolute path to the log file."""
+        """Resolves the absolute log file path."""
         log_file_path = Path(self.LOG_FILE)
         if not log_file_path.is_absolute():
             return (self.PROJECT_ROOT_PATH / log_file_path).resolve()
         return log_file_path
 
+    def init_dirs(self) -> None:
+        """
+        Explicitly initialize directories for the vector store and logs.
+        This separates side effects from pure computation.
+        """
+        self.VECTOR_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        self.LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
-# --- Instantiate Settings ---
+
 try:
     settings = Settings()
-    # Ensure directories exist upon successful settings load
-    settings.VECTOR_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _ = settings.DATABASE_URL
-    _ = settings.LOGS_DIR
+    settings.init_dirs()
 except Exception as e:
     print(f"[ERROR] Failed to load configuration: {e}")
     print(
