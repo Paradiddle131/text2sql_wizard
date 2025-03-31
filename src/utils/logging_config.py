@@ -47,15 +47,3 @@ def setup_logging():
 
     # Log that logging is configured (using the root logger directly)
     logging.info(f"Logging configured: Level={settings.LOG_LEVEL}, File='{log_file}'")
-
-
-# Indicate successful setup at module level if needed
-_logging_configured = False
-
-
-def ensure_logging_configured():
-    """Call this once to configure logging if not already done."""
-    global _logging_configured
-    if not _logging_configured:
-        setup_logging()
-        _logging_configured = True
