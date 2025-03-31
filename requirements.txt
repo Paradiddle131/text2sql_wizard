@@ -14,3 +14,5 @@ sqlalchemy
 unstructured
 pypdf
 plotly
+ruff
+pre-commit
