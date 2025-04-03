@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "ollama"
     OLLAMA_MODEL_NAME: str = "codellama:13b"
     OLLAMA_API_BASE_URL: str = "http://localhost:11434"
+    LLM_TIMEOUT: int = 60
 
     # --- Embedding Model Configuration ---
     EMBEDDING_MODEL_NAME: str = "BAAI/bge-small-en-v1.5"
@@ -50,6 +51,7 @@ class Settings(BaseSettings):
     DB_PASSWORD: str | None = None
     DB_NAME: str | None = None
     DB_SCHEMA: str = "public"
+    DB_DDL_FILE_PATH: Path | str | None = None
 
     # --- Logging Configuration ---
     LOG_LEVEL: str = "INFO"
