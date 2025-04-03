@@ -1,13 +1,13 @@
 # Text-to-SQL Wizard
 
-A simple web application that uses a local LLM (via Ollama) to convert natural language business queries into SQL statements, based on an introspected database schema or a provided DDL file.
+A simple web application that uses a local LLM (via Ollama) to convert natural language business queries into SQL statements, based on introspection of a connected PostgreSQL database schema.
 
 ## Features
 
 *   Simple web UI with a query input box.
 *   Backend powered by FastAPI.
 *   Uses local LLMs via Ollama and `litellm`.
-*   Generates SQL queries based on user input and database schema.
+*   Generates PostgreSQL queries based on user input and introspected database schema.
 *   Dark/Light theme toggle.
 *   (Planned: RAG integration, SQL execution, data visualization).
 
@@ -15,8 +15,9 @@ A simple web application that uses a local LLM (via Ollama) to convert natural l
 
 1.  **Prerequisites:**
     *   Python 3.9+
-    *   `uv` (Python package manager): [Installation Guide](https://github.com/astral-sh/uv)
+    *   `uv`: [Installation Guide](https://github.com/astral-sh/uv)
     *   Ollama: [Installation Guide](https://ollama.com/)
+    *   **PostgreSQL Server:** A running PostgreSQL instance with your database and schema already created and populated.
 
 2.  **Clone the Repository:**
     ```bash
@@ -40,16 +41,12 @@ A simple web application that uses a local LLM (via Ollama) to convert natural l
 
 5.  **Configure Environment:**
     *   Copy `.env.example` to `.env`: `cp .env.example .env`
-    *   **Crucially, edit `.env` and set your `DATABASE_URL`** (e.g., `DATABASE_URL="sqlite:///./data/db/brazilian_sales.db"`).
-    *   (Optional) Override `OLLAMA_MODEL_NAME` or other settings in `.env`.
+    *   **Edit `.env` and set your PostgreSQL connection details** (either `DATABASE_URL` or `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`).
+    *   Ensure the specified `DB_USER` has `CONNECT` privileges on the database and `SELECT` privileges on the tables within the `DB_SCHEMA` (default `public`) that you want the application to see. The user also needs usage rights on the schema itself (`GRANT USAGE ON SCHEMA your_schema TO your_user;`).
+    *   (Optional) Override other settings like `OLLAMA_MODEL_NAME`, `DB_SCHEMA` in `.env`.
 
-6.  **Setup Database (if using fallback or for initial creation):**
-    *   Place your DDL file (containing `CREATE TABLE` statements) at `data/schema/create_tables.sql`.
-    *   (If creating from CSVs) Place CSV files in `data/source_csvs/`. Run:
-        ```bash
-        python src/scripts/load_data.py
-        ```
-    *   *(The application will attempt to introspect the schema from the existing DB specified in `DATABASE_URL` first.)*
+6.  **Database Preparation:**
+    *   **This application reads from an existing database.** Ensure your PostgreSQL database, schema (`public` by default, or set `DB_SCHEMA` in `.env`), tables, and data are already set up *before* running the application.
 
 7.  **Setup Pre-commit Hooks (Optional but Recommended):**
     ```bash
@@ -58,7 +55,7 @@ A simple web application that uses a local LLM (via Ollama) to convert natural l
 
 ## Running the Application
 
-1.  **Ensure Ollama is running.**
+1.  **Ensure Ollama and PostgreSQL are running.**
 2.  **Activate the virtual environment:** `source .venv/bin/activate`
 3.  **Start the FastAPI server:**
     ```bash

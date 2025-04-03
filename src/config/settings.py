@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, computed_field
+from pydantic import PostgresDsn, computed_field
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -43,13 +43,36 @@ class Settings(BaseSettings):
     VECTOR_STORE_COLLECTION: str = "text2sql_rag"
 
     # --- Database Configuration ---
-    DATABASE_URL_STR: str = Field(..., alias="DATABASE_URL")
+    DATABASE_URL: str | None = None  # Loaded directly if present in .env
+    DB_HOST: str | None = None
+    DB_PORT: int | None = None
+    DB_USER: str | None = None
+    DB_PASSWORD: str | None = None
+    DB_NAME: str | None = None
+    DB_SCHEMA: str = "public"
 
     # --- Logging Configuration ---
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "./logs/app.log"  # Relative path for log file
 
-    @computed_field
+    @computed_field(repr=False)
+    def SQLALCHEMY_DATABASE_URL(self) -> str:
+        """Computes the SQLAlchemy database URL."""
+        if self.DATABASE_URL:
+            return self.DATABASE_URL
+        else:
+            return str(
+                PostgresDsn.build(
+                    scheme="postgresql+psycopg2",
+                    username=self.DB_USER,
+                    password=self.DB_PASSWORD,
+                    host=self.DB_HOST,
+                    port=self.DB_PORT,
+                    path=f"{self.DB_NAME}",
+                )
+            )
+
+    @computed_field()
     def PROJECT_ROOT_PATH(self) -> Path:
         return BASE_DIR
 
@@ -59,19 +82,6 @@ class Settings(BaseSettings):
         if not path.is_absolute():
             return (self.PROJECT_ROOT_PATH / path).resolve()
         return path
-
-    @computed_field
-    def DATABASE_URL(self) -> str:
-        """Resolves the database URL and handles relative SQLite paths."""
-        db_url = self.DATABASE_URL_STR
-        if db_url.startswith("sqlite:///./"):
-            relative_path = db_url[len("sqlite:///./") :]
-            abs_path = (self.PROJECT_ROOT_PATH / relative_path).resolve()
-            return f"sqlite:///{abs_path}"
-        elif db_url.startswith("sqlite:///"):
-            abs_path = Path(db_url[len("sqlite:///") :]).resolve()
-            return f"sqlite:///{abs_path}"
-        return db_url
 
     @computed_field
     def LOGS_DIR(self) -> Path:
@@ -100,6 +110,12 @@ class Settings(BaseSettings):
 
 try:
     settings = Settings()
+    if not settings.DATABASE_URL and not all(
+        [settings.DB_HOST, settings.DB_USER, settings.DB_NAME]
+    ):
+        raise ValueError(
+            "If DATABASE_URL is not set, DB_HOST, DB_USER, and DB_NAME must be provided in .env"
+        )
     settings.init_dirs()
 except Exception as e:
     print(f"[ERROR] Failed to load configuration: {e}")
