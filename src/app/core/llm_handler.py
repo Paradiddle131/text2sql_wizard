@@ -37,8 +37,8 @@ async def call_llm(prompt: str, model_name: str = settings.OLLAMA_MODEL_NAME) ->
             messages=[{"role": "system", "content": prompt}],
             api_base=settings.OLLAMA_API_BASE_URL,
             temperature=0.0,
-            max_tokens=500,
-            timeout=60,
+            max_tokens=3000,
+            timeout=120,
         )
         if (
             response.choices
