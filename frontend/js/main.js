@@ -145,61 +145,84 @@ async function handleQuerySubmit() {
 async function handleUploadSubmit(event) {
     event.preventDefault(); // Prevent default form submission
 
-    const file = fileInput.files[0];
-    if (!file) {
-        showUploadStatus("Please select a file to upload.", true);
+    const files = fileInput.files; // Get the FileList object
+    if (!files || files.length === 0) {
+        showUploadStatus("Please select one or more files to upload.", true);
         return;
     }
 
-    // Basic client-side type check (optional but good UX)
-    // Match allowed types specified in backend/RAGService
-    const allowedMimeTypes = [
-        'application/pdf',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
-        'text/plain', // .txt
-        'text/markdown' // Common MIME type for Markdown
-    ];
-    const allowedExtensions = ['.pdf', '.docx', '.txt', '.md'];
-    const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+    setUploadLoadingState(true); // Disable upload controls
+    let successfulUploads = 0;
+    let failedUploads = 0;
+    const totalFiles = files.length;
+    let cumulativeChunks = 0;
 
-    if (!allowedMimeTypes.includes(file.type) && !allowedExtensions.includes(fileExtension)) {
-         console.warn(`File type mismatch: MIME=${file.type}, Extension=${fileExtension}`);
-         showUploadStatus(`Invalid file type. Allowed: PDF, DOCX, TXT, MD`, true);
-         return;
-    }
+    showUploadStatus(`Starting upload of ${totalFiles} file(s)...`, false);
 
-    const formData = new FormData();
-    formData.append('file', file);
+    // Process files one by one
+    for (let i = 0; i < totalFiles; i++) {
+        const file = files[i];
+        const currentFileNum = i + 1;
 
-    setUploadLoadingState(true);
-    showUploadStatus(`Uploading ${file.name}...`);
+        showUploadStatus(`Uploading file ${currentFileNum}/${totalFiles}: ${file.name}...`, false);
 
-    try {
-        const response = await fetch(UPLOAD_API_URL, {
-            method: 'POST',
-            body: formData,
-            // 'Content-Type': 'multipart/form-data' is set automatically by browser with FormData
-            headers: {
-                'Accept': 'application/json' // Expect JSON response for upload status
-            }
-        });
-
-        const result = await response.json(); // Assume server sends JSON response
-
-        if (!response.ok) {
-            // Use detail field from FastAPI's HTTPException or default message
-            throw new Error(result.detail || `Upload failed with status ${response.status}`);
+        // Client-side type check (optional but recommended)
+        const allowedMimeTypes = [
+            'application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'text/plain', 'text/markdown'
+        ];
+        const allowedExtensions = ['.pdf', '.docx', '.txt', '.md'];
+        const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+        if (!allowedMimeTypes.includes(file.type) && !allowedExtensions.includes(fileExtension)) {
+            console.warn(`Skipping file ${file.name} due to invalid type (MIME: ${file.type}, Ext: ${fileExtension})`);
+            showUploadStatus(`Skipped file ${currentFileNum}/${totalFiles}: ${file.name} (invalid type).`, true);
+            failedUploads++;
+            continue; // Skip to the next file
         }
 
-        showUploadStatus(`Success: ${result.message} (${result.chunks_added} chunks added).`, false);
-        fileInput.value = ''; // Clear the file input on success
+        const formData = new FormData();
+        formData.append('file', file);
 
-    } catch (error) {
-        console.error("Upload error:", error);
-        showUploadStatus(`Error uploading file: ${error.message}`, true);
-    } finally {
-        setUploadLoadingState(false);
+        try {
+            const response = await fetch(UPLOAD_API_URL, {
+                method: 'POST',
+                body: formData,
+                headers: { 'Accept': 'application/json' }
+            });
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                // Throw error to be caught below, include filename for context
+                throw new Error(`(${file.name}) ${result.detail || `Upload failed status ${response.status}`}`);
+            }
+
+            // Log success for individual file
+            console.log(`Successfully uploaded ${file.name}. Chunks: ${result.chunks_added}`);
+            successfulUploads++;
+            cumulativeChunks += result.chunks_added;
+            // Update status slightly less frequently, or only on error/completion
+            showUploadStatus(`Uploaded file ${currentFileNum}/${totalFiles}: ${file.name} (${result.chunks_added} chunks).`, false);
+
+
+        } catch (error) {
+            console.error(`Upload error for file ${file.name}:`, error);
+            // Show error for the specific file, but continue loop
+            showUploadStatus(`Error uploading file ${currentFileNum}/${totalFiles}: ${file.name} - ${error.message}`, true);
+            failedUploads++;
+        }
+        // Optional short delay between uploads if needed
+        // await new Promise(resolve => setTimeout(resolve, 100));
     }
+
+    // Final status update after loop finishes
+    let finalMessage = `Finished uploads. ${successfulUploads}/${totalFiles} successful (${cumulativeChunks} total chunks added).`;
+    if (failedUploads > 0) {
+        finalMessage += ` ${failedUploads} failed.`;
+    }
+    showUploadStatus(finalMessage, failedUploads > 0);
+    fileInput.value = ''; // Clear the file input after processing all files
+    setUploadLoadingState(false); // Re-enable upload controls
 }
 
 
