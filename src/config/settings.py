@@ -53,7 +53,12 @@ class Settings(BaseSettings):
     OLLAMA_API_BASE_URL: str = "http://localhost:11434"
     LLM_TIMEOUT: int = 60
 
+    # --- RAG ---
     EMBEDDING_MODEL_NAME: str = "BAAI/bge-small-en-v1.5"
+    CHUNK_SIZE: int = 1000
+    CHUNK_OVERLAP: int = 150
+    RAG_RETRIEVAL_K: int = 5  # Number of chunks to retrieve
+    DOCUMENT_UPLOAD_DIR_STR: str = "./data/uploaded_docs"
 
     VECTOR_STORE_PATH_STR: str = "./data/chroma_db"
     VECTOR_STORE_COLLECTION: str = "text2sql_rag"
@@ -69,6 +74,10 @@ class Settings(BaseSettings):
 
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "./logs/app.log"
+
+    APP_HOST: str = "0.0.0.0"
+    APP_PORT: int = 8000
+    UVICORN_LOG_LEVEL: str = "info"
 
     @computed_field(repr=False)
     def DATABASE_URL(self) -> PostgresDsn:

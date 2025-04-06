@@ -24,6 +24,17 @@
         <!-- <div id="chart-output"></div> -->
     </div>
 
+    <!-- Document Upload Section -->
+    <h2>Upload Business Documents</h2>
+    <p>Upload relevant documents (PDF, DOCX, TXT) to provide context for your queries.</p>
+    <form id="upload-form">
+        <input type="file" id="file-input" name="file" accept=".pdf,.docx,.txt">
+        <button type="submit" id="upload-button">Upload Document</button>
+    </form>
+    <div id="upload-status" style="margin-top: 10px;"></div>
+    <hr style="margin: 20px 0;">
+    <!-- End Document Upload Section -->
+
     <script src="js/main.js"></script>
     <!-- Plotly CDN -->
     <!-- <script src='https://cdn.plot.ly/plotly-latest.min.js'></script> -->

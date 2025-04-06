@@ -48,6 +48,6 @@ if __name__ == "__main__":
     logger.info("Starting Uvicorn server...")
     host = getattr(settings, "APP_HOST", "0.0.0.0")
     port = getattr(settings, "APP_PORT", 8000)
-    log_level = getattr(settings, "UVICORN_LOG_LEVEL", settings.LOG_LEVEL.lower())
+    log_level = getattr(settings, "UVICORN_LOG_LEVEL".lower(), "info")
 
     uvicorn.run("main:app", host=host, port=port, reload=True, log_level=log_level)

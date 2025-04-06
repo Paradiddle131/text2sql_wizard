@@ -15,3 +15,13 @@ class SQLResponse(BaseModel):
     error: Optional[str] = Field(
         None, description="Error message if SQL generation failed."
     )
+
+
+class UploadResponse(BaseModel):
+    """Response model for successful document upload."""
+
+    filename: str = Field(..., description="Name of the uploaded file.")
+    message: str = Field(..., description="Status message.")
+    chunks_added: int = Field(
+        ..., description="Number of text chunks added to the vector store."
+    )

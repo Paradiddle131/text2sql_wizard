@@ -1,5 +1,5 @@
 import logging
-from typing import AsyncGenerator, List, Dict
+from typing import AsyncGenerator, List, Dict, Optional
 from sqlalchemy import (
     create_engine,
     inspect as sqla_inspect,
@@ -30,12 +30,18 @@ def _get_db_engine() -> Engine:
                 connect_args={"options": f"-csearch_path={settings.DB_SCHEMA}"}
                 if settings.DATABASE_URL.scheme.startswith("postgresql")
                 else {},
+                echo=False,
             )
             with _DB_ENGINE.connect() as connection:
-                logger.info(f"Successfully connected to database.")
+                logger.info(f"Successfully created DB engine and tested connection.")
         except sqlalchemy_exc.SQLAlchemyError as e:
-            logger.exception(f"Failed to create database engine: {e}")
-            raise ConnectionError(f"Could not connect to the database: {e}") from e
+            logger.exception(f"Failed to create database engine or connect: {e}")
+            raise ConnectionError("Could not connect to the database.") from e
+        except Exception as e:
+            logger.exception(f"Unexpected error initializing database engine: {e}")
+            raise ConnectionError(
+                "Unexpected error initializing database engine."
+            ) from e
     return _DB_ENGINE
 
 
@@ -46,39 +52,76 @@ def _get_schema_from_introspection(engine: Engine, target_schema: str) -> str | 
     try:
         inspector = sqla_inspect(engine)
         tables = inspector.get_table_names(schema=target_schema)
+
         if not tables:
             logger.warning(
                 f"Introspection found no tables in schema '{target_schema}'."
             )
-            return None
-        logger.debug(f"Found tables in schema '{target_schema}': {tables}")
+            if target_schema == "public":
+                logger.info(
+                    "Retrying introspection without explicit schema parameter for default schema."
+                )
+                tables = inspector.get_table_names(schema=None)
+                if not tables:
+                    logger.warning(
+                        "Introspection found no tables in default schema either."
+                    )
+                    return None
+                else:
+                    logger.info(
+                        f"Found tables in default schema (no explicit param): {tables}"
+                    )
+                    target_schema = ""
+            else:
+                return None
+
+        logger.debug(
+            f"Found tables for schema '{target_schema or 'default'}': {tables}"
+        )
         metadata = MetaData()
         metadata.reflect(bind=engine, schema=target_schema, only=tables)
+
         for table_name in sorted(tables):
             table_key = f"{target_schema}.{table_name}" if target_schema else table_name
             table = metadata.tables.get(table_key)
             if table is None:
+                logger.warning(
+                    f"Could not find table '{table_key}' in reflected metadata."
+                )
                 continue
+
             from sqlalchemy.schema import CreateTable
 
-            create_table_ddl = str(CreateTable(table).compile(engine)).strip()
-            schema_parts.append(f"{create_table_ddl};")
+            try:
+                create_table_ddl = str(CreateTable(table).compile(engine)).strip()
+                schema_parts.append(
+                    f"{create_table_ddl};".replace("\n", "").replace("\t", "")
+                )
+            except Exception as ddl_exc:
+                logger.error(
+                    f"Failed to generate DDL for table '{table_key}': {ddl_exc}",
+                    exc_info=True,
+                )
+
         if not schema_parts:
             logger.warning(
-                f"No table definitions generated for schema '{target_schema}'."
+                f"No table definitions successfully generated for schema '{target_schema or 'default'}'."
             )
             return None
-        full_schema = "\n\n".join(schema_parts)
+
+        full_schema = " ".join(schema_parts)
         logger.info(
-            f"Successfully generated schema via introspection for '{target_schema}'."
+            f"Successfully generated schema via introspection for '{target_schema or 'default'}'."
         )
         return full_schema
     except sqlalchemy_exc.SQLAlchemyError as e:
-        logger.exception(f"DB error during introspection for '{target_schema}': {e}")
+        logger.exception(
+            f"DB error during introspection for '{target_schema or 'default'}': {e}"
+        )
         return None
     except Exception as e:
         logger.exception(
-            f"Unexpected error during introspection for '{target_schema}': {e}"
+            f"Unexpected error during introspection for '{target_schema or 'default'}': {e}"
         )
         return None
 
@@ -86,11 +129,18 @@ def _get_schema_from_introspection(engine: Engine, target_schema: str) -> str | 
 def _get_schema_from_ddl_file() -> str | None:
     """Reads schema definition from the DDL file specified in settings."""
     ddl_path = settings.DB_DDL_FILE_PATH
-    if not ddl_path or not ddl_path.exists():
-        logger.debug(f"DDL file not configured or not found: {ddl_path}")
+    if not ddl_path:
+        logger.debug("DDL file path not configured in settings.")
         return None
+    if not ddl_path.exists():
+        logger.warning(f"DDL file not found at configured path: {ddl_path}")
+        return None
+
     try:
-        schema_content = ddl_path.read_text()
+        schema_content = ddl_path.read_text(encoding="utf-8")
+        if not schema_content.strip():
+            logger.warning(f"DDL file is empty: {ddl_path}")
+            return None
         logger.info(f"Successfully loaded schema from DDL file: {ddl_path}")
         return schema_content.strip()
     except Exception as e:
@@ -99,49 +149,79 @@ def _get_schema_from_ddl_file() -> str | None:
 
 
 def get_database_schema(force_refresh: bool = False) -> str:
-    """Retrieves database schema via introspection or DDL file, caches result."""
+    """
+    Retrieves database schema via introspection or DDL file, caches result.
+
+    Args:
+        force_refresh: If True, bypasses cache and reloads the schema.
+
+    Returns:
+        The database schema as a string, or an error message string.
+
+    Raises:
+        ValueError: If schema loading fails definitively after trying all methods.
+    """
     global _SCHEMA_CACHE, _SCHEMA_SOURCE
-    if _SCHEMA_CACHE and not force_refresh:
+    if _SCHEMA_CACHE and not force_refresh and not _SCHEMA_CACHE.startswith("ERROR:"):
         logger.debug(f"Using cached schema (source: {_SCHEMA_SOURCE})")
         return _SCHEMA_CACHE
-    logger.info("Attempting to load database schema...")
+
+    logger.info(
+        f"Attempting to load database schema (force_refresh={force_refresh})..."
+    )
     schema: str | None = None
     source: str = "Unknown"
+
     try:
         engine = _get_db_engine()
         schema = _get_schema_from_introspection(engine, settings.DB_SCHEMA)
         if schema:
             source = "Introspection"
         else:
-            logger.warning("Introspection failed/yielded no schema.")
-    except ConnectionError:
-        logger.error("Introspection skipped: DB connection failed.")
-    except Exception as e:
-        logger.exception(f"Error during introspection setup: {e}")
+            logger.warning("Introspection failed or yielded no schema content.")
+    except ConnectionError as conn_err:
+        logger.error(f"Introspection skipped: DB connection failed. {conn_err}")
+    except Exception as intro_err:
+        logger.exception(
+            f"Unexpected error during introspection setup/execution: {intro_err}"
+        )
+
     if not schema:
-        logger.info("Attempting DDL file fallback.")
+        logger.info(
+            "Introspection failed or yielded no schema. Attempting DDL file fallback."
+        )
         schema = _get_schema_from_ddl_file()
         if schema:
             source = "DDL File"
+        else:
+            logger.warning("DDL file loading failed or yielded no schema content.")
+
     if not schema:
-        logger.error("Failed to load schema from introspection & DDL file.")
-        _SCHEMA_CACHE = "ERROR:NO_SCHEMA_AVAILABLE"
+        logger.error("Failed to load schema from both introspection and DDL file.")
+        error_msg = "ERROR:NO_SCHEMA_AVAILABLE"
+        _SCHEMA_CACHE = error_msg
         _SCHEMA_SOURCE = "None"
+        raise ValueError("Database schema could not be loaded from any source.")
     else:
-        logger.info(f"Database schema loaded (source: {source}).")
+        logger.info(
+            f"Database schema loaded successfully (source: {source}). Caching result."
+        )
         _SCHEMA_CACHE = schema
         _SCHEMA_SOURCE = source
-    return _SCHEMA_CACHE
+        return _SCHEMA_CACHE
 
 
-async def generate_sql_query(
-    user_query: str, force_schema_refresh: bool = False
+async def generate_sql_query_with_context(
+    user_query: str,
+    retrieved_context: Optional[str] = None,
+    force_schema_refresh: bool = False,
 ) -> AsyncGenerator[str, None]:
     """
-    Generates SQL query from NL query using LLM, streaming the raw response chunks.
+    Generates SQL query from NL query using LLM, schema, and optional context, streaming the response.
 
     Args:
         user_query: The natural language query.
+        retrieved_context: Optional context string retrieved from documents.
         force_schema_refresh: Whether to force reloading the DB schema.
 
     Yields:
@@ -151,26 +231,39 @@ async def generate_sql_query(
         ValueError: If the database schema cannot be loaded.
         LLMNotAvailableError: If the LLM call fails.
     """
-    db_schema = get_database_schema(force_refresh=force_schema_refresh)
-    if db_schema.startswith("ERROR:"):
-        logger.error(f"Cannot generate SQL: Schema loading failed ({db_schema})")
-        raise ValueError(f"Database schema could not be loaded ({db_schema}).")
+    try:
+        db_schema = get_database_schema(force_refresh=force_schema_refresh)
+    except ValueError as e:
+        logger.error(
+            f"Cannot generate SQL: Essential schema loading failed. Error: {e}"
+        )
+        raise ValueError(f"Database schema could not be loaded: {e}") from e
 
     system_prompt = f"""You are an expert PostgreSQL query generator.
-    Given the following PostgreSQL database schema (specifically for the '{settings.DB_SCHEMA}' schema) and a user question, generate a *single*, valid PostgreSQL query that accurately answers the question.
+    Given the following PostgreSQL database schema (primarily for the '{settings.DB_SCHEMA}' schema) and potentially relevant context from business documents, generate a *single*, valid PostgreSQL query that accurately answers the user's question.
 
     **Instructions:**
     - Output ONLY the raw SQL query, enclosed in a markdown code block (```sql ... ```).
     - Ensure the query is syntactically correct for PostgreSQL.
-    - Use table and column names exactly as defined in the schema. Qualify table names with the schema name (e.g., "{settings.DB_SCHEMA}.table_name").
-    - Do NOT include any explanations, comments, or introductory text outside the markdown block.
+    - Use table and column names exactly as defined in the schema. If table names require schema qualification (e.g., because they are not in the default search_path implicitly covered by the schema definition), qualify them (e.g., "{settings.DB_SCHEMA}.table_name"). Assume '{settings.DB_SCHEMA}' is the primary schema unless context strongly implies otherwise.
+    - If relevant context from documents is provided, use it to understand business terms, relationships, or specific constraints mentioned in the user question that might not be obvious from the schema alone.
+    - Do NOT include any explanations, comments, or introductory text outside the markdown code block.
     - Pay close attention to PostgreSQL specific functions and syntax if needed."""
 
-    user_prompt_content = f"""**Database Schema:**
-    ```sql
+    context_section = ""
+    if retrieved_context:
+        context_section = f"""**Relevant Context from Documents:**
+    ```text
+    {retrieved_context}
+    ```
+    """
+
+    user_prompt_content = f"""**Database Schema ({settings.DB_SCHEMA}):**
+    ```
     {db_schema}
     ```
-    User Question:
+    {context_section}
+    **User Question:**
     {user_query}
 
     SQL Query (PostgreSQL):
@@ -180,17 +273,16 @@ async def generate_sql_query(
         {"role": "user", "content": user_prompt_content},
     ]
 
-    logger.debug(f"Sending prompt to LLM for query: '{user_query}'")
+    logger.debug(
+        f"Sending prompt to LLM for query: '{user_query}' (context included: {bool(retrieved_context)})"
+    )
 
     try:
         async for chunk in stream_llm_response(messages):
             yield chunk
         logger.info(f"Finished streaming SQL for query: '{user_query}'")
     except LLMNotAvailableError as e:
-        logger.error(f"LLM error during SQL generation stream: {e}")
-        raise
-    except ValueError as e:
-        logger.error(f"Schema error during SQL generation: {e}")
+        logger.error(f"LLM error during SQL generation stream: {e}", exc_info=True)
         raise
     except Exception as e:
         logger.exception(f"Unexpected error generating SQL query stream: {e}")

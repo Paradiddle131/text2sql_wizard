@@ -16,3 +16,7 @@ pypdf
 plotly
 ruff
 pre-commit
+langchain
+unstructured[local-inference]
+pypdf
+python-docx
