@@ -156,15 +156,16 @@ async function handleUploadSubmit(event) {
     const allowedMimeTypes = [
         'application/pdf',
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
-        'text/plain' // .txt
+        'text/plain', // .txt
+        'text/markdown' // Common MIME type for Markdown
     ];
-    const allowedExtensions = ['.pdf', '.docx', '.txt'];
+    const allowedExtensions = ['.pdf', '.docx', '.txt', '.md'];
     const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
 
     if (!allowedMimeTypes.includes(file.type) && !allowedExtensions.includes(fileExtension)) {
          console.warn(`File type mismatch: MIME=${file.type}, Extension=${fileExtension}`);
-         // Allow upload anyway, backend will perform the definitive check
-         // showUploadStatus(`Warning: Browser detected type ${file.type}. Allowed: PDF, DOCX, TXT. Uploading anyway...`, false);
+         showUploadStatus(`Invalid file type. Allowed: PDF, DOCX, TXT, MD`, true);
+         return;
     }
 
     const formData = new FormData();

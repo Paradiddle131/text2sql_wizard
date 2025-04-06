@@ -17,6 +17,7 @@ __pycache__/
 # Vector store files
 .chroma/
 src/data/chroma_db/*
+src/data/uploaded_docs/*
 
 # Environment variables
 .env

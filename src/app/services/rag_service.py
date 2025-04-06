@@ -156,7 +156,7 @@ class RAGService:
             HTTPException: If the file type is invalid or processing fails.
             RAGServiceError: For internal processing issues.
         """
-        allowed_extensions = {".pdf", ".txt", ".docx"}
+        allowed_extensions = {".pdf", ".txt", ".docx", ".md"}
         file_extension = Path(file.filename).suffix.lower()
 
         if file_extension not in allowed_extensions:
