@@ -222,6 +222,16 @@ class RAGService:
                     )
             await file.close()
 
+    async def delete_collection(self) -> bool:
+        """Delete the collection."""
+        try:
+            self.chroma_client.delete_collection(name=self.collection.name)
+            logger.info("Successfully deleted the collection.")
+            return True
+        except Exception as e:
+            logger.exception(f"Failed to delete the collection: {e}")
+            return False
+
     def _process_and_embed_file_sync(
         self, file_path: Path, original_filename: str
     ) -> Tuple[List[str], List[Dict], List[str]]:
