@@ -10,6 +10,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
+from utils.logging_config import setup_logging
+
+setup_logging()
+
 from config.settings import settings
 from app.api import endpoints
 
@@ -50,4 +54,13 @@ if __name__ == "__main__":
     port = getattr(settings, "APP_PORT", 8000)
     log_level = getattr(settings, "UVICORN_LOG_LEVEL".lower(), "info")
 
-    uvicorn.run("main:app", host=host, port=port, reload=True, log_level=log_level)
+    uvicorn.run(
+        app="main:app",
+        host=host,
+        port=port,
+        reload=True,
+        log_level=log_level,
+        reload_dirs=["frontend", "src"],
+        reload_includes=["*.py", "*.html", "*.css", "*.js"],
+        reload_excludes=["*.log", "*.pyc", "*.bin"],
+    )

@@ -12,4 +12,4 @@ dependencies = [
 lint.select = ["E"]
 
 # Never enforce `E501` (line length violations).
-lint.ignore = ["E501"]
+lint.ignore = ["E501", "E402"]

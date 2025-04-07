@@ -44,6 +44,8 @@ def setup_logging():
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("chromadb").setLevel(logging.WARNING)
     logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
+    logging.getLogger("LiteLLM").setLevel(logging.INFO)
+    logging.getLogger("urllib3").setLevel(logging.INFO)
 
     # Log that logging is configured (using the root logger directly)
     logging.info(f"Logging configured: Level={settings.LOG_LEVEL}, File='{log_file}'")
