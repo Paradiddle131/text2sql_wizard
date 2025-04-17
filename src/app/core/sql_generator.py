@@ -8,7 +8,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 
-from app.core.llm_handler import stream_llm_response
+from app.core.llm_handler import stream_llm_response, LLMNotAvailableError
 from config.settings import settings
 
 
