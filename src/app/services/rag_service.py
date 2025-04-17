@@ -39,12 +39,12 @@ class RAGService:
                     model_name=settings.EMBEDDING_MODEL_NAME
                 )
             )
-            logger.info(f"Embedding function loaded: {settings.EMBEDDING_MODEL_NAME}")
+            logger.debug(f"Embedding function loaded: {settings.EMBEDDING_MODEL_NAME}")
 
             self.chroma_client = chromadb.PersistentClient(
                 path=str(settings.VECTOR_STORE_PATH)
             )
-            logger.info(
+            logger.debug(
                 f"ChromaDB client connected to path: {settings.VECTOR_STORE_PATH}"
             )
 
@@ -63,7 +63,7 @@ class RAGService:
                 length_function=len,
                 add_start_index=True,
             )
-            logger.info(
+            logger.debug(
                 f"Text splitter configured: Chunk Size={settings.CHUNK_SIZE}, Overlap={settings.CHUNK_OVERLAP}"
             )
 
@@ -299,7 +299,7 @@ class RAGService:
         if not query:
             return None
 
-        logger.info(f"Retrieving context for query: '{query[:50]}...'")
+        logger.info(f"Retrieving context for query.")
         try:
             results = self.collection.query(
                 query_texts=[query],
@@ -313,7 +313,7 @@ class RAGService:
                 or not results["documents"][0]
             ):
                 logger.info(
-                    f"No relevant documents found in ChromaDB for query: '{query[:50]}...'"
+                    f"No relevant documents found in ChromaDB for query."
                 )
                 return None
 
@@ -331,12 +331,12 @@ class RAGService:
                 context_parts.append(f"Source: {source}\nContent:\n{doc}")
 
             combined_context = "\n\n---\n\n".join(context_parts)
-            logger.info(f"Retrieved {len(retrieved_docs)} chunks for query.")
+            logger.debug(f"Retrieved {len(retrieved_docs)} chunks for query.")
             return combined_context
 
         except Exception as e:
             logger.exception(
-                f"Failed to retrieve context from ChromaDB for query '{query[:50]}...': {e}"
+                f"Failed to retrieve context from ChromaDB for query: {e}"
             )
             return None
 

@@ -58,7 +58,7 @@ app.include_router(endpoints.router, prefix="/api")
 
 try:
     app.mount("/", StaticFiles(directory="src/frontend", html=True), name="static")
-    logger.info("Serving static files from 'frontend' directory at '/'")
+    logger.debug("Serving static files from 'frontend' directory at '/'")
 except RuntimeError as e:
     logger.error(f"Failed to mount static files directory 'frontend'. Error: {e}")
     logger.error("Ensure the 'frontend' directory exists in the project root.")

@@ -92,13 +92,6 @@ async def process_query(
     async def sql_and_result_stream():
         try:
             retrieved_context = await rag_service.retrieve_context(query)
-            if retrieved_context:
-                logger.info(
-                    f"Retrieved context for query '{query[:50]}...'. Length: {len(retrieved_context)}"
-                )
-            else:
-                logger.info(
-                    f"No context retrieved for query '{query[:50]}...'. Proceeding with schema only.")
 
             sql_chunks = []
             async for chunk in generate_sql_query_with_context(query, retrieved_context):

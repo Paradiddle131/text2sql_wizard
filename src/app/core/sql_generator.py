@@ -116,7 +116,7 @@ def _get_schema_from_introspection(engine: Engine, target_schema: str) -> str | 
             return None
 
         full_schema = " ".join(schema_parts)
-        logger.info(
+        logger.debug(
             f"Successfully generated schema via introspection for '{target_schema or 'default'}'."
         )
         return full_schema
@@ -144,15 +144,15 @@ def _get_schema_from_ddl_file() -> str | None:
         logger.debug("DDL file path not configured in settings.")
         return None
     if not ddl_path.exists():
-        logger.warning(f"DDL file not found at configured path: {ddl_path}")
+        logger.debug(f"DDL file not found at configured path: {ddl_path}")
         return None
 
     try:
         schema_content = ddl_path.read_text(encoding="utf-8")
         if not schema_content.strip():
-            logger.warning(f"DDL file is empty: {ddl_path}")
+            logger.debug(f"DDL file is empty: {ddl_path}")
             return None
-        logger.info(f"Successfully loaded schema from DDL file: {ddl_path}")
+        logger.debug(f"Successfully loaded schema from DDL file: {ddl_path}")
         return " ".join(schema_content.strip().split())
     except Exception as e:
         logger.exception(f"Error reading DDL file {ddl_path}: {e}")
@@ -177,7 +177,7 @@ def get_database_schema(force_refresh: bool = False) -> str:
         logger.debug(f"Using cached schema (source: {_SCHEMA_SOURCE})")
         return _SCHEMA_CACHE
 
-    logger.info(
+    logger.debug(
         f"Attempting to load database schema (force_refresh={force_refresh})..."
     )
     schema: str | None = None
@@ -190,7 +190,7 @@ def get_database_schema(force_refresh: bool = False) -> str:
         if schema:
             source = "Introspection"
         else:
-            logger.warning(f"Introspection for schema '{settings.DB_SCHEMA}' failed or yielded no schema content.")
+            logger.debug(f"Introspection for schema '{settings.DB_SCHEMA}' failed or yielded no schema content.")
     except ConnectionError as conn_err:
         logger.error(f"Introspection skipped: DB connection failed. {conn_err}")
     except Exception as intro_err:
@@ -200,14 +200,14 @@ def get_database_schema(force_refresh: bool = False) -> str:
 
     # Attempt 2: DDL File (if introspection failed)
     if not schema:
-        logger.info(
+        logger.debug(
             "Attempting DDL file fallback."
         )
         schema = _get_schema_from_ddl_file()
         if schema:
             source = "DDL File"
         else:
-            logger.warning("DDL file loading failed or yielded no schema content.")
+            logger.debug("DDL file loading failed or yielded no schema content.")
 
     # Final Check and Caching
     if not schema:
@@ -217,7 +217,7 @@ def get_database_schema(force_refresh: bool = False) -> str:
         _SCHEMA_SOURCE = "None"
         raise ValueError("Database schema could not be loaded from any source.")
     else:
-        logger.info(
+        logger.debug(
             f"Database schema loaded successfully (source: {source}). Caching result."
         )
         _SCHEMA_CACHE = schema
@@ -297,14 +297,14 @@ async def generate_sql_query_with_context(
     ]
 
     logger.info(
-        f"Generating SQL for query: '{user_query}' using LLM model: {settings.LLM_MODEL}"
+        f"Generating SQL for query using LLM model: {settings.LLM_MODEL}"
     )
     logger.debug(f"Context included: {bool(retrieved_context)}")
 
     try:
         async for chunk in stream_llm_response(messages, model_name=settings.LLM_MODEL):
             yield chunk
-        logger.info(f"Finished streaming SQL for query: '{user_query}'")
+        logger.info(f"Finished streaming SQL for query")
     except LLMNotAvailableError as e:
         logger.error(f"LLM error during SQL generation stream: {e}", exc_info=False) # exc_info=False as error is logged in handler
         yield f"ERROR: LLM service failed during SQL generation. Details: {e}"
