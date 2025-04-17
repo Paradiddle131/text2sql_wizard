@@ -1,12 +1,14 @@
 import logging
 from fastapi import APIRouter, HTTPException, Body, Depends, UploadFile, File
-from fastapi.responses import JSONResponse
+from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 
-from app.api.schemas import QueryRequest, UploadResponse, SQLResponse
+from app.api.schemas import QueryRequest, UploadResponse
 from app.core.sql_generator import generate_sql_query_with_context, _get_db_engine
 from app.core.llm_handler import LLMNotAvailableError
 from app.services.rag_service import get_rag_service, RAGService, RAGServiceError
+
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -72,20 +74,13 @@ async def upload_document(
         )
 
 
-@router.post("/query", response_model=SQLResponse)
+@router.post("/query")
 async def process_query(
     request_data: QueryRequest = Body(...),
     rag_service: RAGService = Depends(get_rag_service),
 ):
     """
-    Receives a natural language query, generates SQL, executes it, and returns both.
-
-    Args:
-        request_data: The request body containing the natural language query.
-        rag_service: Dependency injected RAGService instance.
-
-    Returns:
-        SQLResponse: Contains the generated SQL, execution result, or an error.
+    Receives a natural language query, retrieves context, generates SQL, and streams both SQL and result as plain text chunks.
     """
     query = request_data.query
     if not query:
@@ -94,63 +89,61 @@ async def process_query(
 
     logger.info(f"Received query for RAG-SQL generation: '{query}'")
 
-    try:
-        retrieved_context = await rag_service.retrieve_context(query)
-        if retrieved_context:
-            logger.info(
-                f"Retrieved context for query '{query[:50]}...'. Length: {len(retrieved_context)}"
-            )
-        else:
-            logger.info(
-                f"No context retrieved for query '{query[:50]}...'. Proceeding with schema only."
-            )
-
-        # Aggregate the SQL from the async generator
-        sql_chunks = []
-        async for chunk in generate_sql_query_with_context(query, retrieved_context):
-            sql_chunks.append(chunk)
-        sql_query = "".join(sql_chunks).strip()
-
-        if not sql_query:
-            logger.error("No SQL query was generated.")
-            return SQLResponse(sql_query=None, result=None, error="No SQL query was generated.")
-
-        executable_sql = extract_sql_query(sql_query)
-
-        # Execute the SQL
+    async def sql_and_result_stream():
         try:
-            engine = _get_db_engine()
-            with engine.connect() as connection:
-                result_proxy = connection.execute(text(executable_sql))
-                try:
-                    result = result_proxy.fetchall()
-                    # Format result as markdown table if it's a list of tuples with at least 2 columns
-                    if result and isinstance(result, list) and hasattr(result[0], "__iter__"):
-                        # Get column names from result_proxy if available
-                        columns = result_proxy.keys() if hasattr(result_proxy, "keys") else None
-                        if columns:
-                            table_header = "| " + " | ".join(columns) + " |\n"
-                            table_sep = "|" + "|".join([" --- " for _ in columns]) + "|\n"
-                            table_rows = "".join([
-                                "| " + " | ".join(str(cell) for cell in row) + " |\n" for row in result
-                            ])
-                            markdown_table = table_header + table_sep + table_rows
-                            return SQLResponse(
-                                sql_query=sql_query,
-                                result=markdown_table,
-                                error=None,
-                            )
-                except Exception:
-                    result = None
-        except Exception as exec_err:
-            logger.error(f"SQL execution failed: {exec_err}")
-            return SQLResponse(sql_query=sql_query, result=None, error=f"SQL execution failed: {exec_err}")
+            retrieved_context = await rag_service.retrieve_context(query)
+            if retrieved_context:
+                logger.info(
+                    f"Retrieved context for query '{query[:50]}...'. Length: {len(retrieved_context)}"
+                )
+            else:
+                logger.info(
+                    f"No context retrieved for query '{query[:50]}...'. Proceeding with schema only.")
 
-        return SQLResponse(sql_query=sql_query, result=result, error=None)
+            sql_chunks = []
+            async for chunk in generate_sql_query_with_context(query, retrieved_context):
+                sql_chunks.append(chunk)
+                yield chunk
+            sql_query = "".join(sql_chunks).strip()
 
-    except LLMNotAvailableError as e:
-        logger.error(f"LLM error during SQL generation: {e}", exc_info=True)
-        return SQLResponse(sql_query=None, result=None, error=f"LLM error: {e}")
-    except Exception as e:
-        logger.exception(f"Unexpected error generating SQL or executing query: {e}")
-        return SQLResponse(sql_query=None, result=None, error=f"Unexpected error: {e}")
+            if not sql_query:
+                logger.error("No SQL query was generated.")
+                yield "\n--ERROR--\nNo SQL query was generated."
+                return
+
+            yield "\n--SQL-END--\n"
+
+            executable_sql = extract_sql_query(sql_query)
+            try:
+                engine = _get_db_engine()
+                with engine.connect() as connection:
+                    result_proxy = connection.execute(text(executable_sql))
+                    try:
+                        result = result_proxy.fetchall()
+                        if result and isinstance(result, list) and hasattr(result[0], "__iter__"):
+                            columns = result_proxy.keys() if hasattr(result_proxy, "keys") else None
+                            if columns:
+                                table_header = "| " + " | ".join(columns) + " |\n"
+                                table_sep = "|" + "|".join([" --- " for _ in columns]) + "|\n"
+                                table_rows = "".join([
+                                    "| " + " | ".join(str(cell) for cell in row) + " |\n" for row in result
+                                ])
+                                markdown_table = table_header + table_sep + table_rows
+                                yield f"--RESULT--\n{markdown_table}\n"
+                                return
+                    except Exception:
+                        result = None
+            except Exception as exec_err:
+                logger.error(f"SQL execution failed: {exec_err}")
+                yield f"--ERROR--\nSQL execution failed: {exec_err}\n"
+                return
+
+            yield f"--RESULT--\n{result}\n"
+        except LLMNotAvailableError as e:
+            logger.error(f"LLM error during SQL generation: {e}", exc_info=True)
+            yield f"--ERROR--\nLLM error: {e}\n"
+        except Exception as e:
+            logger.exception(f"Unexpected error generating SQL or executing query: {e}")
+            yield f"--ERROR--\nUnexpected error: {e}\n"
+
+    return StreamingResponse(sql_and_result_stream(), media_type="text/plain")

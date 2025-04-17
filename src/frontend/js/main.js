@@ -66,6 +66,10 @@ uploadForm.addEventListener('submit', handleUploadSubmit);
 
 
 // --- Query Submission Handler ---
+/**
+ * Submits the user's query to the backend and streams SQL/result chunks to the UI in real time.
+ * Handles plain text streaming with section markers: --SQL-END--, --RESULT--, --ERROR--
+ */
 async function handleQuerySubmit() {
     const queryText = queryInput.value.trim();
     if (!queryText) {
@@ -83,67 +87,116 @@ async function handleQuerySubmit() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Accept': 'application/json'
+                'Accept': 'text/plain'
             },
             body: JSON.stringify({ query: queryText })
         });
 
-        const data = await response.json();
-
         if (!response.ok) {
-            // Use error message from backend response if available
-            throw new Error(data.detail || data.error || `Request failed with status ${response.status}`);
+            let errMsg = `Request failed with status ${response.status}`;
+            try {
+                const errData = await response.json();
+                errMsg = errData.detail || errData.error || errMsg;
+            } catch { /* ignore */ }
+            throw new Error(errMsg);
         }
 
-        console.log("Received response:", data);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let sqlBuffer = '';
+        let resultBuffer = '';
+        let errorBuffer = '';
+        let mode = 'sql'; // 'sql', 'result', 'error'
+        let seenSqlEnd = false;
+        let seenResult = false;
+        let seenError = false;
+        let remainder = '';
 
-        let sqlGenerated = false;
-        if (data.sql_query) {
-            const cleanedSql = cleanSqlString(data.sql_query);
-            if (cleanedSql.startsWith("ERROR:")) {
-                 showError(cleanedSql);
-                 sqlOutputCode.textContent = '-- SQL Generation Failed --';
-            } else {
-                 sqlOutputCode.textContent = cleanedSql;
-                 if (window.Prism) {
-                      Prism.highlightElement(sqlOutputCode);
-                 }
-                 sqlGenerated = true;
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            let chunk = decoder.decode(value, { stream: true });
+            chunk = remainder + chunk;
+            remainder = '';
+
+            // Process markers
+            while (chunk.length > 0) {
+                if (!seenSqlEnd) {
+                    const sqlEndIdx = chunk.indexOf('--SQL-END--');
+                    const errorIdx = chunk.indexOf('--ERROR--');
+                    if (sqlEndIdx !== -1) {
+                        sqlBuffer += chunk.substring(0, sqlEndIdx);
+                        chunk = chunk.substring(sqlEndIdx + '--SQL-END--'.length);
+                        seenSqlEnd = true;
+                        mode = 'result';
+                        sqlOutputCode.textContent = cleanSqlString(sqlBuffer);
+                        if (window.Prism) Prism.highlightElement(sqlOutputCode);
+                        continue;
+                    } else if (errorIdx !== -1) {
+                        errorBuffer += chunk.substring(errorIdx + '--ERROR--'.length);
+                        chunk = '';
+                        seenError = true;
+                        mode = 'error';
+                        break;
+                    } else {
+                        sqlBuffer += chunk;
+                        chunk = '';
+                        sqlOutputCode.textContent = cleanSqlString(sqlBuffer);
+                        if (window.Prism) Prism.highlightElement(sqlOutputCode);
+                        continue;
+                    }
+                } else if (mode === 'result') {
+                    const resultIdx = chunk.indexOf('--RESULT--');
+                    const errorIdx = chunk.indexOf('--ERROR--');
+                    if (resultIdx !== -1) {
+                        resultBuffer += chunk.substring(resultIdx + '--RESULT--'.length);
+                        chunk = '';
+                        seenResult = true;
+                        break;
+                    } else if (errorIdx !== -1) {
+                        errorBuffer += chunk.substring(errorIdx + '--ERROR--'.length);
+                        chunk = '';
+                        seenError = true;
+                        mode = 'error';
+                        break;
+                    } else {
+                        resultBuffer += chunk;
+                        chunk = '';
+                        continue;
+                    }
+                } else if (mode === 'error') {
+                    errorBuffer += chunk;
+                    chunk = '';
+                    break;
+                } else {
+                    // Should not reach here
+                    chunk = '';
+                }
             }
 
-        } else {
-            sqlOutputCode.textContent = "-- No SQL query generated --";
-        }
-
-        // Handle potential errors returned in a 2xx response (e.g., execution error)
-        if (data.error) {
-            showError(data.error);
-            resultsSection.style.display = sqlGenerated ? 'block' : 'none';
-            return; // Stop further processing
-        }
-
-
-        // Display Result (Rendered Markdown or Plain Text)
-        if (data.result !== null && data.result !== undefined) {
-            if (typeof data.result === 'string') {
-                 resultOutput.innerHTML = marked.parse(data.result);
-            } else {
-                 resultOutput.textContent = JSON.stringify(data.result, null, 2);
+            // Show/hide results section as data arrives
+            if (sqlBuffer.length > 0) {
+                resultsSection.style.display = 'block';
             }
+        }
+
+        // Final UI state
+        if (seenError || errorBuffer.trim()) {
+            showError(errorBuffer.trim() || "An error occurred.");
+            resultsSection.style.display = 'none';
         } else {
-            if (sqlGenerated) {
+            if (sqlBuffer.length > 0) {
+                sqlOutputCode.textContent = cleanSqlString(sqlBuffer);
+                if (window.Prism) Prism.highlightElement(sqlOutputCode);
+            }
+            if (resultBuffer.length > 0) {
+                resultOutput.innerHTML = marked.parse(resultBuffer);
+                resultsSection.style.display = 'block';
+            } else if (seenSqlEnd) {
                 resultOutput.textContent = "-- Query executed successfully, but returned no data. --";
-            } else {
-                resultOutput.innerHTML = '';
+                resultsSection.style.display = 'block';
             }
         }
-
-        if (sqlGenerated || (data.result !== null && data.result !== undefined)) {
-           resultsSection.style.display = 'block';
-        } else {
-           resultsSection.style.display = 'none';
-        }
-
 
     } catch (error) {
         console.error("Query fetch or processing error:", error);
