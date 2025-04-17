@@ -1,7 +1,8 @@
 // --- DOM Elements ---
 const queryInput = document.getElementById('query-input');
 const submitButton = document.getElementById('submit-button');
-const sqlOutput = document.getElementById('sql-output'); // For raw SQL
+// Get the CODE element for SQL output
+const sqlOutputCode = document.getElementById('sql-output-code');
 const resultOutput = document.getElementById('result-output'); // For rendered result
 const errorOutput = document.getElementById('error-output');
 const loadingIndicator = document.getElementById('loading-indicator');
@@ -33,6 +34,11 @@ function applyTheme(theme) {
         document.body.removeAttribute('data-theme');
         themeToggleButton.innerHTML = MOON_ICON_SVG;
         themeToggleButton.setAttribute('title', 'Switch to Dark Mode');
+    }
+    // Potentially re-highlight after theme change if colors depend heavily on it
+    // and CSS overrides aren't sufficient (usually not needed if CSS vars are used well)
+    if (sqlOutputCode.textContent) {
+        Prism.highlightElement(sqlOutputCode);
     }
 }
 function toggleTheme() {
@@ -77,12 +83,12 @@ async function handleQuerySubmit() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Accept': 'application/json' // Expect JSON response
+                'Accept': 'application/json'
             },
             body: JSON.stringify({ query: queryText })
         });
 
-        const data = await response.json(); // Parse the JSON response
+        const data = await response.json();
 
         if (!response.ok) {
             // Use error message from backend response if available
@@ -91,50 +97,58 @@ async function handleQuerySubmit() {
 
         console.log("Received response:", data);
 
-        // Handle potential errors returned in a 2xx response
+        let sqlGenerated = false;
+        if (data.sql_query) {
+            const cleanedSql = cleanSqlString(data.sql_query);
+            if (cleanedSql.startsWith("ERROR:")) {
+                 showError(cleanedSql);
+                 sqlOutputCode.textContent = '-- SQL Generation Failed --';
+            } else {
+                 sqlOutputCode.textContent = cleanedSql;
+                 if (window.Prism) {
+                      Prism.highlightElement(sqlOutputCode);
+                 }
+                 sqlGenerated = true;
+            }
+
+        } else {
+            sqlOutputCode.textContent = "-- No SQL query generated --";
+        }
+
+        // Handle potential errors returned in a 2xx response (e.g., execution error)
         if (data.error) {
             showError(data.error);
-            // Still display SQL if it was generated before the error (e.g., execution error)
-             if (data.sql_query) {
-                 // Clean SQL even if there's an execution error later
-                 const cleanedSql = cleanSqlString(data.sql_query); // Call cleaning function
-                 sqlOutput.textContent = cleanedSql;
-                 resultsSection.style.display = 'block'; // Show section even with error if SQL exists
-             }
+            resultsSection.style.display = sqlGenerated ? 'block' : 'none';
             return; // Stop further processing
         }
 
-        // Display SQL Query
-        if (data.sql_query) {
-            // Clean the SQL string before displaying
-            const cleanedSql = cleanSqlString(data.sql_query); // Call cleaning function
-            sqlOutput.textContent = cleanedSql;
-        } else {
-            sqlOutput.textContent = "-- No SQL query generated --";
-        }
 
         // Display Result (Rendered Markdown or Plain Text)
         if (data.result !== null && data.result !== undefined) {
             if (typeof data.result === 'string') {
-                 // Use marked to parse the result string into HTML
-                 // Note: No sanitization is applied here by default with marked.
-                 // If the source of 'data.result' wasn't fully trusted, you'd use DOMPurify:
-                 // resultOutput.innerHTML = DOMPurify.sanitize(marked.parse(data.result));
                  resultOutput.innerHTML = marked.parse(data.result);
             } else {
-                 // Handle non-string results (e.g., numbers, JSON objects if API changes)
                  resultOutput.textContent = JSON.stringify(data.result, null, 2);
             }
         } else {
-            resultOutput.textContent = "-- Query executed successfully, but returned no data. --";
+            if (sqlGenerated) {
+                resultOutput.textContent = "-- Query executed successfully, but returned no data. --";
+            } else {
+                resultOutput.innerHTML = '';
+            }
         }
 
-        resultsSection.style.display = 'block'; // Show the results section
+        if (sqlGenerated || (data.result !== null && data.result !== undefined)) {
+           resultsSection.style.display = 'block';
+        } else {
+           resultsSection.style.display = 'none';
+        }
+
 
     } catch (error) {
         console.error("Query fetch or processing error:", error);
         showError(`An error occurred: ${error.message}`);
-        resultsSection.style.display = 'none'; // Hide results section on fetch error
+        resultsSection.style.display = 'none';
     } finally {
         setLoadingState(false);
         console.log("handleQuerySubmit finished.");
@@ -157,7 +171,7 @@ async function handleUploadSubmit(event) {
     const totalFiles = files.length;
     let cumulativeChunks = 0;
 
-    showUploadStatus(`Starting upload of ${totalFiles} file(s)...`, 'info'); // Use 'info' for neutral
+    showUploadStatus(`Starting upload of ${totalFiles} file(s)...`, 'info');
 
     for (let i = 0; i < totalFiles; i++) {
         const file = files[i];
@@ -167,11 +181,9 @@ async function handleUploadSubmit(event) {
 
         const allowedExtensions = ['.pdf', '.docx', '.txt', '.md'];
         const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-        // Basic client-side check (server validation is primary)
+
         if (!allowedExtensions.includes(fileExtension)) {
              console.warn(`Skipping file ${file.name} due to invalid extension: ${fileExtension}`);
-             // Don't show a persistent error, maybe just log or a temporary notice
-             // showUploadStatus(`Skipped file ${currentFileNum}/${totalFiles}: ${file.name} (invalid type).`, 'error');
              failedUploads++;
              continue;
         }
@@ -195,12 +207,9 @@ async function handleUploadSubmit(event) {
             console.log(`Successfully uploaded ${file.name}. Chunks: ${result.chunks_added}`);
             successfulUploads++;
             cumulativeChunks += result.chunks_added;
-            // Can update status less frequently if needed
-            // showUploadStatus(`Uploaded file ${currentFileNum}/${totalFiles}: ${file.name} (${result.chunks_added} chunks).`, 'info');
 
         } catch (error) {
             console.error(`Upload error for file ${file.name}:`, error);
-            // Show error for the specific file, but continue loop
             showUploadStatus(`Error uploading file ${currentFileNum}/${totalFiles}: ${file.name} - ${error.message}`, 'error');
             failedUploads++;
         }
@@ -211,10 +220,10 @@ async function handleUploadSubmit(event) {
     let finalStatusType = 'success';
     if (failedUploads > 0) {
         finalMessage += ` ${failedUploads} failed.`;
-        finalStatusType = successfulUploads > 0 ? 'warning' : 'error'; // Show warning if partial success
+        finalStatusType = successfulUploads > 0 ? 'warning' : 'error';
     }
     showUploadStatus(finalMessage, finalStatusType);
-    fileInput.value = ''; // Clear the file input
+    fileInput.value = '';
     setUploadLoadingState(false);
 }
 
@@ -223,7 +232,7 @@ async function handleUploadSubmit(event) {
 function setLoadingState(isLoading) {
     submitButton.disabled = isLoading;
     if (isLoading) {
-        loadingIndicator.style.display = 'flex'; // Use flex to align spinner and text
+        loadingIndicator.style.display = 'flex';
     } else {
         loadingIndicator.style.display = 'none';
     }
@@ -234,7 +243,7 @@ function setUploadLoadingState(isLoading) {
     fileInput.disabled = isLoading;
 }
 
-function showUploadStatus(message, type = 'info') { // type: 'info', 'success', 'error', 'warning'
+function showUploadStatus(message, type = 'info') {
     uploadStatus.textContent = message;
     uploadStatus.className = 'status-message'; // Reset classes
     if (type === 'success') {
@@ -242,38 +251,41 @@ function showUploadStatus(message, type = 'info') { // type: 'info', 'success', 
     } else if (type === 'error') {
         uploadStatus.classList.add('error');
     } else if (type === 'warning'){
-         uploadStatus.classList.add('warning'); // Optional: Add CSS for warning state if needed
+         uploadStatus.classList.add('warning');
     }
-    // 'info' uses default styling
     uploadStatus.style.display = 'block';
 }
 
 
 function clearOutput() {
-    sqlOutput.textContent = '';
-    resultOutput.innerHTML = ''; // Clear innerHTML for the div
+    // Clear the CODE element for SQL
+    sqlOutputCode.textContent = '';
+    resultOutput.innerHTML = '';
     errorOutput.textContent = '';
     errorOutput.style.display = 'none';
-    resultsSection.style.display = 'none'; // Hide the results section
+    resultsSection.style.display = 'none';
     // Keep upload status visible unless explicitly cleared
 }
 
 function showError(message) {
     errorOutput.textContent = message;
     errorOutput.style.display = 'block';
-     resultsSection.style.display = 'none'; // Hide results section when showing a query error
+    resultsSection.style.display = 'none';
 }
 
 function cleanSqlString(rawSql) {
     if (!rawSql) return "";
+    if (rawSql.trim().startsWith("ERROR:")) {
+        return rawSql.trim();
+    }
     // Remove leading ```sql, optional language specifier, and trailing ```
     let cleaned = rawSql.trim();
-    cleaned = cleaned.replace(/^```(?:sql)?\s*/i, ''); // Remove ```sql or ``` at the start (case-insensitive)
-    cleaned = cleaned.replace(/```\s*$/, '');    // Remove ``` at the end
-    return cleaned.trim(); // Trim final whitespace
+    cleaned = cleaned.replace(/^```(?:sql)?\s*/i, '');
+    cleaned = cleaned.replace(/```\s*$/, '');
+    return cleaned.trim();
 }
 
 // --- Initial setup ---
 loadTheme();
-clearOutput(); // Clear query output/errors on load
-uploadStatus.style.display = 'none'; // Hide upload status initially
+clearOutput();
+uploadStatus.style.display = 'none';

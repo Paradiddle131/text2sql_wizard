@@ -342,3 +342,93 @@ pre {
         align-items: stretch; /* Make elements full width */
     }
 }
+
+/* --- PrismJS Theme Overrides for Better Integration --- */
+
+/* Apply base background/text from variables */
+pre[class*="language-"],
+code[class*="language-"] {
+    background-color: var(--pre-bg-color);
+    color: var(--text-color);
+    text-shadow: none; /* Remove default text shadow from some themes */
+}
+
+/* Override specific token colors using CSS variables if desired */
+/* You can inspect the elements Prism creates (span.token.keyword, etc.) */
+/* and map them to semantic colors or use the theme's defaults */
+
+.token.keyword,
+.token.selector,
+.token.attr-name,
+.token.operator /* Added operator */
+ {
+    /* Example: Use a distinct color, maybe adaptable */
+    color: #569cd6; /* A common blue for keywords/operators */
+}
+[data-theme="dark"] .token.keyword,
+[data-theme="dark"] .token.selector,
+[data-theme="dark"] .token.attr-name,
+[data-theme="dark"] .token.operator {
+     color: #569cd6; /* Keep same blue in dark mode, or adjust */
+}
+
+
+.token.function,
+.token.class-name {
+     color: #dcdcaa; /* Yellowish for functions */
+}
+[data-theme="dark"] .token.function,
+[data-theme="dark"] .token.class-name {
+     color: #dcdcaa;
+}
+
+
+.token.string,
+.token.char,
+.token.attr-value {
+    color: #ce9178; /* Orangy for strings */
+}
+[data-theme="dark"] .token.string,
+[data-theme="dark"] .token.char,
+[data-theme="dark"] .token.attr-value {
+    color: #ce9178;
+}
+
+.token.comment {
+    color: #6a9955; /* Green for comments */
+    font-style: italic;
+}
+[data-theme="dark"] .token.comment {
+     color: #6a9955;
+}
+
+
+.token.number,
+.token.boolean,
+.token.constant,
+.token.symbol {
+    color: #b5cea8; /* Light green/blue for numbers/constants */
+}
+[data-theme="dark"] .token.number,
+[data-theme="dark"] .token.boolean,
+[data-theme="dark"] .token.constant,
+[data-theme="dark"] .token.symbol {
+     color: #b5cea8;
+}
+
+.token.punctuation {
+     /* Use subtle text color or default theme color */
+     color: var(--subtle-text-color);
+}
+[data-theme="dark"] .token.punctuation {
+     color: var(--subtle-text-color);
+}
+
+/* Ensure pre retains padding and overflow */
+#sql-output-pre { /* Target the PRE element specifically */
+    padding: 15px; /* Re-apply padding if overridden by theme */
+    margin: 0; /* Reset margin if needed */
+    overflow: auto; /* Ensure scrollbars appear if needed */
+    border-radius: var(--border-radius); /* Keep consistent border radius */
+    border: 1px solid var(--pre-border-color); /* Keep consistent border */
+}

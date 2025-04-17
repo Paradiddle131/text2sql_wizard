@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Text-to-SQL Wizard</title>
+    <!-- Link to Prism theme CSS (e.g., Okaidia) -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-okaidia.min.css" rel="stylesheet" />
     <link rel="stylesheet" href="css/style.css">
     <!-- Add Marked.js library -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -41,7 +43,7 @@
         <!-- Results Section -->
         <section class="card" id="results-section" style="display: none;">
             <h2>Generated SQL</h2>
-            <pre id="sql-output"></pre>
+            <pre id="sql-output-pre"><code id="sql-output-code" class="language-sql"></code></pre>
 
             <h2>Query Result</h2>
             <div class="result-wrapper"> <!-- Wrapper for potential table scrolling -->
@@ -51,6 +53,10 @@
 
     </div>
 
-    <script src="js/main.js"></script>
+    <!-- Prism Core JS (Defer loading) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js" defer></script>
+    <!-- Prism SQL Language Component JS (Defer loading) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js" defer></script>
+    <script src="js/main.js" defer></script>
 </body>
 </html>
