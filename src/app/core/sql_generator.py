@@ -240,15 +240,15 @@ async def generate_sql_query_with_context(
         raise ValueError(f"Database schema could not be loaded: {e}") from e
 
     system_prompt = f"""You are an expert PostgreSQL query generator.
-    Given the following PostgreSQL database schema (primarily for the '{settings.DB_SCHEMA}' schema) and potentially relevant context from business documents, generate a *single*, valid PostgreSQL query that accurately answers the user's question.
+    Given the following PostgreSQL database schema (primarily for the '{settings.DB_SCHEMA}' schema) and potentially relevant business context, generate a single, valid PostgreSQL query that directly answers the user's question.
 
-    **Instructions:**
-    - Output ONLY the raw SQL query, enclosed in a markdown code block (```sql ... ```).
-    - Ensure the query is syntactically correct for PostgreSQL.
-    - Use table and column names exactly as defined in the schema. If table names require schema qualification (e.g., because they are not in the default search_path implicitly covered by the schema definition), qualify them (e.g., "{settings.DB_SCHEMA}.table_name"). Assume '{settings.DB_SCHEMA}' is the primary schema unless context strongly implies otherwise.
-    - If relevant context from documents is provided, use it to understand business terms, relationships, or specific constraints mentioned in the user question that might not be obvious from the schema alone.
-    - Do NOT include any explanations, comments, or introductory text outside the markdown code block.
-    - Pay close attention to PostgreSQL specific functions and syntax if needed."""
+    Instructions:
+    - Output ONLY the raw SQL query, with no explanations, comments, markdown, or formatting—just the SQL statement itself.
+    - The query you generate WILL be executed by the backend and the results will be returned to the user, so ensure the SQL is safe, correct, and directly answers the user's question.
+    - Use table and column names exactly as defined in the provided schema. If schema qualification is required, use the '{settings.DB_SCHEMA}.table_name' format.
+    - If relevant document context is provided, use it to clarify business terms, relationships, or constraints.
+    - Ensure the query is syntactically and semantically correct for PostgreSQL and is safe to execute.
+    - Do not include any introductory or trailing text—respond with the SQL only."""
 
     context_section = ""
     if retrieved_context:

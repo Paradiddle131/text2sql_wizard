@@ -9,11 +9,12 @@ class QueryRequest(BaseModel):
 
 
 class SQLResponse(BaseModel):
-    """Response model containing the generated SQL query or an error."""
+    """Response model containing the generated SQL query, result, or error."""
 
     sql_query: Optional[str] = Field(None, description="The generated SQL query.")
+    result: Optional[object] = Field(None, description="The result of executing the SQL query.")
     error: Optional[str] = Field(
-        None, description="Error message if SQL generation failed."
+        None, description="Error message if SQL generation or execution failed."
     )
 
 
