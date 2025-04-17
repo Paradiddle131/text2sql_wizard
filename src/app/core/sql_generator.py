@@ -8,8 +8,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 
-from app.core.llm_handler import LLMNotAvailableError, stream_llm_response
+from app.core.llm_handler import stream_llm_response
 from config.settings import settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -79,24 +80,29 @@ def _get_schema_from_introspection(engine: Engine, target_schema: str) -> str | 
             f"Found tables for schema '{target_schema or 'default'}': {tables}"
         )
         metadata = MetaData()
-        metadata.reflect(bind=engine, schema=target_schema, only=tables)
+        metadata.reflect(bind=engine, schema=target_schema or None, only=tables)
 
         for table_name in sorted(tables):
             table_key = f"{target_schema}.{table_name}" if target_schema else table_name
             table = metadata.tables.get(table_key)
             if table is None:
-                logger.warning(
-                    f"Could not find table '{table_key}' in reflected metadata."
-                )
-                continue
+                # Fallback check if reflection didn't use schema prefix
+                if not target_schema and table_name in metadata.tables:
+                     table = metadata.tables[table_name]
+                     table_key = table_name # Adjust key for logging/error msg
+                elif table_key not in metadata.tables:
+                     # If still not found, log warning and skip
+                     logger.warning(
+                         f"Could not find table '{table_key}' in reflected metadata. Keys available: {list(metadata.tables.keys())}"
+                     )
+                     continue
 
             from sqlalchemy.schema import CreateTable
 
             try:
                 create_table_ddl = str(CreateTable(table).compile(engine)).strip()
-                schema_parts.append(
-                    f"{create_table_ddl};".replace("\n", "").replace("\t", "")
-                )
+                cleaned_ddl = ' '.join(create_table_ddl.replace('"', '').split())
+                schema_parts.append(f"{cleaned_ddl};")
             except Exception as ddl_exc:
                 logger.error(
                     f"Failed to generate DDL for table '{table_key}': {ddl_exc}",
@@ -114,6 +120,11 @@ def _get_schema_from_introspection(engine: Engine, target_schema: str) -> str | 
             f"Successfully generated schema via introspection for '{target_schema or 'default'}'."
         )
         return full_schema
+    except sqlalchemy_exc.OperationalError as e:
+        logger.error(
+            f"DB Operational Error during introspection for '{target_schema or 'default'}': {e}. Check permissions/connection."
+        )
+        return None
     except sqlalchemy_exc.SQLAlchemyError as e:
         logger.exception(
             f"DB error during introspection for '{target_schema or 'default'}': {e}"
@@ -142,7 +153,7 @@ def _get_schema_from_ddl_file() -> str | None:
             logger.warning(f"DDL file is empty: {ddl_path}")
             return None
         logger.info(f"Successfully loaded schema from DDL file: {ddl_path}")
-        return schema_content.strip()
+        return " ".join(schema_content.strip().split())
     except Exception as e:
         logger.exception(f"Error reading DDL file {ddl_path}: {e}")
         return None
@@ -156,13 +167,13 @@ def get_database_schema(force_refresh: bool = False) -> str:
         force_refresh: If True, bypasses cache and reloads the schema.
 
     Returns:
-        The database schema as a string, or an error message string.
+        The database schema as a string.
 
     Raises:
         ValueError: If schema loading fails definitively after trying all methods.
     """
     global _SCHEMA_CACHE, _SCHEMA_SOURCE
-    if _SCHEMA_CACHE and not force_refresh and not _SCHEMA_CACHE.startswith("ERROR:"):
+    if _SCHEMA_CACHE and not force_refresh:
         logger.debug(f"Using cached schema (source: {_SCHEMA_SOURCE})")
         return _SCHEMA_CACHE
 
@@ -172,13 +183,14 @@ def get_database_schema(force_refresh: bool = False) -> str:
     schema: str | None = None
     source: str = "Unknown"
 
+    # Attempt 1: Introspection
     try:
         engine = _get_db_engine()
         schema = _get_schema_from_introspection(engine, settings.DB_SCHEMA)
         if schema:
             source = "Introspection"
         else:
-            logger.warning("Introspection failed or yielded no schema content.")
+            logger.warning(f"Introspection for schema '{settings.DB_SCHEMA}' failed or yielded no schema content.")
     except ConnectionError as conn_err:
         logger.error(f"Introspection skipped: DB connection failed. {conn_err}")
     except Exception as intro_err:
@@ -186,9 +198,10 @@ def get_database_schema(force_refresh: bool = False) -> str:
             f"Unexpected error during introspection setup/execution: {intro_err}"
         )
 
+    # Attempt 2: DDL File (if introspection failed)
     if not schema:
         logger.info(
-            "Introspection failed or yielded no schema. Attempting DDL file fallback."
+            "Attempting DDL file fallback."
         )
         schema = _get_schema_from_ddl_file()
         if schema:
@@ -196,10 +209,11 @@ def get_database_schema(force_refresh: bool = False) -> str:
         else:
             logger.warning("DDL file loading failed or yielded no schema content.")
 
+    # Final Check and Caching
     if not schema:
-        logger.error("Failed to load schema from both introspection and DDL file.")
-        error_msg = "ERROR:NO_SCHEMA_AVAILABLE"
-        _SCHEMA_CACHE = error_msg
+        logger.error("FATAL: Failed to load schema from both introspection and DDL file.")
+        error_msg = "ERROR: Database schema could not be loaded. Check logs for introspection/DDL file errors."
+        _SCHEMA_CACHE = error_msg # Cache error state to prevent repeated attempts
         _SCHEMA_SOURCE = "None"
         raise ValueError("Database schema could not be loaded from any source.")
     else:
@@ -233,59 +247,67 @@ async def generate_sql_query_with_context(
     """
     try:
         db_schema = get_database_schema(force_refresh=force_schema_refresh)
+        if db_schema.startswith("ERROR:"):
+             raise ValueError(db_schema) # Raise the cached error message
     except ValueError as e:
         logger.error(
             f"Cannot generate SQL: Essential schema loading failed. Error: {e}"
         )
-        raise ValueError(f"Database schema could not be loaded: {e}") from e
+        # Yield an error message instead of raising immediately, allows API to respond
+        yield f"ERROR: Could not load database schema. Cannot generate SQL. Details: {e}"
+        return # Stop generation
 
-    system_prompt = f"""You are an expert PostgreSQL query generator.
-    Given the following PostgreSQL database schema (primarily for the '{settings.DB_SCHEMA}' schema) and potentially relevant business context, generate a single, valid PostgreSQL query that directly answers the user's question.
+    db_type = "PostgreSQL"
+    if settings.DATABASE_URL.scheme:
+        if "mysql" in settings.DATABASE_URL.scheme:
+            db_type = "MySQL"
+        elif "sqlite" in settings.DATABASE_URL.scheme:
+            db_type = "SQLite"
+
+    system_prompt = f"""You are an expert {db_type} query generator.
+    Given the following {db_type} database schema (primarily for the '{settings.DB_SCHEMA}' schema) and potentially relevant business context, generate a single, valid {db_type} query that directly answers the user's question.
 
     Instructions:
-    - Output ONLY the raw SQL query, with no explanations, comments, markdown, or formatting—just the SQL statement itself.
+    - Output ONLY the raw SQL query, with no explanations, comments, markdown formatting (like ```sql), or introductory/trailing text.
     - The query you generate WILL be executed by the backend and the results will be returned to the user, so ensure the SQL is safe, correct, and directly answers the user's question.
-    - Use table and column names exactly as defined in the provided schema. If schema qualification is required, use the '{settings.DB_SCHEMA}.table_name' format.
-    - If relevant document context is provided, use it to clarify business terms, relationships, or constraints.
-    - Ensure the query is syntactically and semantically correct for PostgreSQL and is safe to execute.
-    - Do not include any introductory or trailing text—respond with the SQL only."""
+    - Ensure the SQL is safe, correct, and directly answers the user's question.
+    - Use table and column names exactly as defined in the schema. If schema qualification is needed, use '{settings.DB_SCHEMA}.table_name' (adjust if DB type requires different quoting).
+    - Use the provided context (if any) to understand business terms or relationships.
+    - The query MUST be syntactically correct for {db_type}.
+    - Respond with only the SQL statement."""
 
     context_section = ""
     if retrieved_context:
         context_section = f"""**Relevant Context from Documents:**
     ```text
     {retrieved_context}
-    ```
-    """
+    ```"""
 
     user_prompt_content = f"""**Database Schema ({settings.DB_SCHEMA}):**
-    ```
+    ```sql
     {db_schema}
     ```
     {context_section}
-    **User Question:**
+    User Question:
     {user_query}
-
-    SQL Query (PostgreSQL):
-    """
+    {db_type} Query:"""
     messages: List[Dict[str, str]] = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt_content},
     ]
 
-    logger.debug(
-        f"Sending prompt to LLM for query: '{user_query}' (context included: {bool(retrieved_context)})"
+    logger.info(
+        f"Generating SQL for query: '{user_query}' using LLM model: {settings.LLM_MODEL}"
     )
+    logger.debug(f"Context included: {bool(retrieved_context)}")
 
     try:
-        async for chunk in stream_llm_response(messages):
+        async for chunk in stream_llm_response(messages, model_name=settings.LLM_MODEL):
             yield chunk
         logger.info(f"Finished streaming SQL for query: '{user_query}'")
     except LLMNotAvailableError as e:
-        logger.error(f"LLM error during SQL generation stream: {e}", exc_info=True)
-        raise
+        logger.error(f"LLM error during SQL generation stream: {e}", exc_info=False) # exc_info=False as error is logged in handler
+        yield f"ERROR: LLM service failed during SQL generation. Details: {e}"
     except Exception as e:
         logger.exception(f"Unexpected error generating SQL query stream: {e}")
-        raise LLMNotAvailableError(
-            f"Unexpected error during SQL generation stream: {e}"
-        ) from e
+        yield f"ERROR: An unexpected error occurred during SQL generation: {e}"
