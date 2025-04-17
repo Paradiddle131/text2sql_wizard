@@ -5,38 +5,52 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Text-to-SQL Wizard</title>
     <link rel="stylesheet" href="css/style.css">
+    <!-- Add Marked.js library -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
     <div class="theme-switch-wrapper">
-        <button id="theme-toggle-button">Toggle Theme</button>
+        <button id="theme-toggle-button" title="Toggle Theme"></button> <!-- Title set by JS -->
     </div>
     <div class="container">
         <h1>Text-to-SQL Wizard</h1>
-        <p>Enter your business query below:</p>
-        <textarea id="query-input" placeholder="e.g., Show me the total sales per product category for the last quarter"></textarea>
-        <button id="submit-button">Generate SQL</button>
 
-        <h2>Generated SQL:</h2>
-        <div id="loading-indicator" style="display: none;">Generating...</div>
-        <pre id="result-output"></pre>
-        <div id="error-output" class="error-message"></div>
-        <!-- Visualization placeholder -->
-        <!-- <div id="chart-output"></div> -->
+        <!-- Document Upload Section -->
+        <section class="card">
+            <h2>Upload Business Context</h2>
+            <p>Upload relevant documents (PDF, DOCX, TXT, MD) to provide context for your queries.</p>
+            <form id="upload-form">
+                <input type="file" id="file-input" name="file" accept=".pdf,.docx,.txt,.md" multiple>
+                <button type="submit" id="upload-button">Upload Document(s)</button>
+            </form>
+            <div id="upload-status" class="status-message" style="display: none;"></div>
+        </section>
+
+        <!-- Query Section -->
+        <section class="card">
+            <h2>Ask Your Query</h2>
+            <p>Enter your business query below:</p>
+            <textarea id="query-input" placeholder="e.g., Show me the total sales per product category for the last quarter"></textarea>
+            <button id="submit-button">Generate & Execute SQL</button>
+            <div id="loading-indicator" style="display: none;">
+                <div class="spinner"></div> Generating...
+            </div>
+            <div id="error-output" class="error-message" style="display: none;"></div>
+        </section>
+
+        <!-- Results Section -->
+        <section class="card" id="results-section" style="display: none;">
+            <h2>Generated SQL</h2>
+            <pre id="sql-output"></pre>
+
+            <h2>Query Result</h2>
+            <div class="result-wrapper"> <!-- Wrapper for potential table scrolling -->
+                <div id="result-output"></div>
+            </div>
+        </section>
+
     </div>
 
-    <!-- Document Upload Section -->
-    <h2>Upload Business Documents</h2>
-    <p>Upload relevant documents (PDF, DOCX, TXT, MD) to provide context for your queries.</p>
-    <form id="upload-form">
-        <input type="file" id="file-input" name="file" accept=".pdf,.docx,.txt,.md" multiple>
-        <button type="submit" id="upload-button">Upload Document</button>
-    </form>
-    <div id="upload-status" style="margin-top: 10px;"></div>
-    <hr style="margin: 20px 0;">
-    <!-- End Document Upload Section -->
-
     <script src="js/main.js"></script>
-    <!-- Plotly CDN -->
-    <!-- <script src='https://cdn.plot.ly/plotly-latest.min.js'></script> -->
 </body>
 </html>
