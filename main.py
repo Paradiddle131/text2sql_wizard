@@ -3,6 +3,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 
 # Add src to Python path
 import sys
@@ -16,14 +17,30 @@ setup_logging()
 
 from config.settings import settings
 from app.api import endpoints
+from app.services.rag_service import RAGService
+from app.core.sql_generator import _get_db_engine
 
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app):
+    try:
+        await RAGService.get_instance()
+        logger.info("RAGService initialized at startup.")
+        _get_db_engine()
+        logger.info("Database engine initialized at startup.")
+    except Exception as e:
+        logger.error(f"Startup initialization failed: {e}")
+        raise
+    yield
 
 
 app = FastAPI(
     title="Text-to-SQL Wizard",
     description="Converts natural language business queries into SQL.",
     version="0.1.0",
+    lifespan=lifespan
 )
 
 
